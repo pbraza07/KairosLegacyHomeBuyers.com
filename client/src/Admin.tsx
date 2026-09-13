@@ -416,6 +416,7 @@ export default function Admin({
                   <span>
                     {new Date(item.created_at).toLocaleDateString()} · Email:{" "}
                     {item.notification_state}
+                    {item.last_code && ` (${item.last_code})`}
                   </span>
                 </summary>
                 <dl>

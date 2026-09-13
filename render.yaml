@@ -26,9 +26,11 @@ services:
           property: connectionString
       - key: DATABASE_SSL
         value: "false"
-      - key: GMAIL_SMTP_USER
-        value: kairoslegacyhomes@gmail.com
-      - key: GMAIL_SMTP_APP_PASSWORD
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: RESEND_API_KEY
+        sync: false
+      - key: NOTIFICATION_FROM
         sync: false
       - key: NOTIFICATION_EMAIL
         value: kairoslegacyhomes@gmail.com

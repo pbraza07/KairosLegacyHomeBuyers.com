@@ -341,7 +341,7 @@ export function createApp() {
   });
   app.post("/api/admin/retry-notifications", async (_req, res) => {
     await pool.query(
-      "UPDATE notifications SET state='pending',attempts=0,next_attempt=now() WHERE state IN ('failed','disabled')",
+      "UPDATE notifications SET state='pending',attempts=0,next_attempt=now() WHERE state IN ('failed','disabled') OR (state='sending' AND updated_at<now()-interval '5 minutes')",
     );
     res.json({ ok: true });
   });

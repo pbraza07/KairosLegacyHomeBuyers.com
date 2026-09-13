@@ -10,7 +10,7 @@ A complete React + Vite / Express TypeScript website for Tampa Bay homeowners re
 - Contact form with real server validation and storage. Neither form calculates an offer.
 - Admin login, full structured content editor, repeatable items, page metadata, theme colors, logo/hero image uploads, private inquiry review, deletion, and notification retry.
 - Durable database-backed content: editing a seed file never overwrites previously saved admin changes. Migration defaults are inserted only once.
-- Gmail SMTP notification outbox with retries. Messages contain a link to `/admin`, not seller information. No email integration runs in the browser.
+- Resend HTTPS/Gmail SMTP notification outbox with retries. Messages contain a link to `/admin`, not seller information. No email integration runs in the browser.
 - Database migrations, health check, Render Blueprint, local PostgreSQL Docker Compose, test suite, and environment example.
 
 ## Local setup
@@ -40,7 +40,7 @@ Open `http://localhost:3000`. Use that exact origin (not `127.0.0.1`) because su
 
 ### Create your admin account
 
-Privately set `ADMIN_EMAIL` and a non-empty `ADMIN_PASSWORD` in `.env` or the environment. The application does not enforce a minimum password length; use a long, unique password in production. Do not put your password into source code, GitHub, a command argument, or a shared chat.
+Privately set `ADMIN_EMAIL` and a non-empty, unique `ADMIN_PASSWORD` in `.env` or the environment. A strong password is still recommended. Do not put your password into source code, GitHub, a command argument, or a shared chat.
 
 ```bash
 npm run admin:create
@@ -105,37 +105,52 @@ Blueprint syntax and current plan identifiers were checked against [Render's Blu
 
 ## Email notifications
 
-This implementation sends server-side notifications through Gmail SMTP using a
-Gmail App Password. Set all of these in Render's **server environment**:
+The notification outbox supports two server-side transports. Set
+`EMAIL_PROVIDER=resend` for Render Free (recommended), or
+`EMAIL_PROVIDER=gmail` only on a Render plan that permits outbound SMTP. With
+`EMAIL_PROVIDER=auto`, the server prefers a complete Resend configuration and
+otherwise uses complete Gmail variables.
 
-- `GMAIL_SMTP_USER`: the Gmail account that sends the notification, such as `kairoslegacyhomes@gmail.com`.
-- `GMAIL_SMTP_APP_PASSWORD`: a Google App Password for that account, not the normal Google password.
+### Resend (recommended on Render Free)
+
+Set these in Render's **server environment**:
+
+- `RESEND_API_KEY`: private Resend API key with send permission.
+- `NOTIFICATION_FROM`: a sender at a domain verified in Resend, such as `Kairos Legacy Homes <notifications@YOUR-VERIFIED-DOMAIN>`.
 - `NOTIFICATION_EMAIL`: the destination inbox; it defaults to `kairoslegacyhomes@gmail.com`.
 
-Gmail App Passwords require 2-Step Verification. Create one at
-<https://myaccount.google.com/apppasswords>, label it something like `Kairos
-Render`, and copy the generated password once. If the App Password option is
-missing, the account may be a managed work/school account, use Advanced
-Protection, or have 2-Step Verification configured in a mode that does not
-allow App Passwords. See [Google's App Password guidance](https://support.google.com/accounts/answer/185833).
+For a short test, Resend's `onboarding@resend.dev` sender may be usable only for
+the account's permitted test recipient. Production should use a domain you
+control and verify in Resend. The HTTPS API uses a 10-second timeout and an
+inquiry-specific idempotency key.
 
-The server connects to `smtp.gmail.com` over TLS on port 465 and sends from the
-authenticated `GMAIL_SMTP_USER`. Do not use a normal Gmail password, an API key
-from another provider, a Render URL, or a seller's email address as the sender. Keep the App
-Password server-only; never put it in a `VITE_` variable, browser code, GitHub,
-or a public URL.
+### Gmail SMTP (temporary paid-plan fallback)
+
+Set these variables when the Render service can make outbound SMTP connections:
+
+- `GMAIL_SMTP_USER`: the Gmail account that sends the notification.
+- `GMAIL_SMTP_APP_PASSWORD`: a Google App Password, not the normal Google password.
+- `NOTIFICATION_EMAIL`: the destination inbox.
+
+Gmail App Passwords require 2-Step Verification. Create one at
+<https://myaccount.google.com/apppasswords> and paste the generated value
+without spaces or quotation marks. The server connects to `smtp.gmail.com` over
+TLS on port 465. Render Free blocks outbound SMTP ports 25, 465 and 587, so
+Gmail SMTP cannot work there; use Resend over HTTPS instead.
 
 After a successful database transaction, the outbox processor checks for
 notifications every 30 seconds. Missing configuration marks notification
 status **disabled**. Configured delivery retries with increasing delays, up to
-six attempts; failures stay visible in admin and can be retried there. SMTP
-failures are stored separately from a successful lead save, so a notification
-problem never creates a false success or loses the inquiry.
+six attempts; failures stay visible in admin and can be retried there. Provider
+timeouts prevent an item from remaining in **sending** forever, and the retry
+button re-queues stale sending jobs. A notification failure does not change a
+saved inquiry into an error for the homeowner.
 
-**sent** means Gmail accepted the SMTP message; inbox delivery or bounce
-confirmation is not implemented. Check Gmail Spam/Promotions and the account's
-Sent folder during launch testing. No real emails were sent during development
-verification.
+**sent** means the provider accepted the message; inbox delivery/bounce
+confirmation is not implemented. Check the provider dashboard and the
+recipient's Spam, Promotions, Sent and All Mail folders during launch testing.
+The notification body contains only a secure `/admin` link; seller information
+remains in the protected admin area.
 
 ## Spam protection and security
 
@@ -186,7 +201,7 @@ npm run test:browser
 - Your GitHub repository / Render account and selected paid plans.
 - Final domain / canonical HTTPS origin.
 - Your private admin email and strong password (the supplied business email may be used).
-- Gmail App Password for the sending account and confirmation of the notification inbox.
+- Verified notification sender domain, Resend API key, and confirmation of the notification inbox.
 - Optional Turnstile keys and registered hostname.
 - Approved Privacy Policy, business retention/deletion procedure, and chosen backup settings.
 - Review the supplied phone `(813) 699-9316`, email `kairoslegacyhomes@gmail.com`, service areas, and family/veteran ownership wording. These are already populated, not missing placeholders.

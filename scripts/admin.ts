@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 async function main() {
   const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
   const password = process.env.ADMIN_PASSWORD;
-  if (!email || typeof password !== "string" || password.length === 0)
+  if (!email || !password)
     throw new Error(
       "Set ADMIN_EMAIL and a non-empty ADMIN_PASSWORD in your private environment.",
     );

@@ -31,7 +31,7 @@ Responsive breakpoints, visible focus styles, sticky-CTA clearance, reduced-moti
 
 - Actual Render deployment/Blueprint validation in the owner's account and managed PostgreSQL connectivity; the production database was not provisioned.
 - Production HTTPS admin cookie, chosen domain/origin and proxy topology.
-- Real Gmail App Password configuration and recipient inbox delivery; development tests sent no real messages.
+- Real provider credentials and recipient inbox delivery; development tests used an injected transport and sent no real messages. Render Free requires the Resend HTTPS path because outbound SMTP is blocked there.
 - Real Turnstile keys/allowed hostnames if enabled.
 - Provider backups and a restore exercise, privacy/retention approval, and final mobile/tablet QA.
 

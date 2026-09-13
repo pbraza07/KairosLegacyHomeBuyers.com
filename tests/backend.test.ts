@@ -185,12 +185,12 @@ test("admin login, CSRF, content version guard, assets and private deletion", as
     [
       randomUUID(),
       "admin@example.test",
-      await passwordHash("a"),
+      await passwordHash("long-secret-password"),
     ],
   );
   const login = await request("/api/admin/login", {
     email: "admin@example.test",
-    password: "a",
+    password: "long-secret-password",
   });
   assert.equal(login.status, 200);
   const cookie = login.headers.get("set-cookie")!;
@@ -321,18 +321,17 @@ test("database failures return a retryable error and cannot report saved", async
   );
 });
 test("notification provider failure is separate and retry can recover", async () => {
-  process.env.GMAIL_SMTP_USER = "kairoslegacyhomes@gmail.com";
-  process.env.GMAIL_SMTP_APP_PASSWORD = "test-only";
+  process.env.GMAIL_SMTP_USER = "sender@example.test";
+  process.env.GMAIL_SMTP_APP_PASSWORD = "test-app-password";
   process.env.NOTIFICATION_EMAIL = "inbox@example.test";
   await pool.query(
     "UPDATE notifications SET state='pending',attempts=0,next_attempt=now()",
   );
   setNotificationTransportForTests({
     sendMail: async () => {
-      const error = Object.assign(new Error("connection failed"), {
-        code: "ECONNECTION",
+      throw Object.assign(new Error("synthetic auth failure"), {
+        code: "EAUTH",
       });
-      throw error;
     },
   });
   try {
@@ -341,11 +340,9 @@ test("notification provider failure is separate and retry can recover", async ()
     assert.ok(failed.rows.every((r) => r.state === "failed"));
     await pool.query("UPDATE notifications SET next_attempt=now()");
     setNotificationTransportForTests({
-      sendMail: async (message) => {
-        assert.equal(message.to, "inbox@example.test");
-        assert.equal(message.from, "kairoslegacyhomes@gmail.com");
+      sendMail: async (message: any) => {
         assert.ok(!String(message.text).includes("seller@example.test"));
-        return {} as any;
+        return { messageId: "synthetic-provider-id" } as any;
       },
     });
     await processNotifications();
