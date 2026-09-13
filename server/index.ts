@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { createApp, attachFrontend } from "./app";
 import { pool } from "./db";
+import { migrate } from "./migrate";
 import { processNotifications } from "./notifications";
 if (
   !process.env.DATABASE_URL ||
@@ -13,6 +14,23 @@ if (
   );
 if (!!process.env.TURNSTILE_SITE_KEY !== !!process.env.TURNSTILE_SECRET_KEY)
   throw new Error("Configure both Turnstile keys or neither.");
+
+// Keep startup safe for manually-created Render services where the Blueprint's
+// preDeployCommand was not synced. This migration is idempotent and protected
+// by a PostgreSQL advisory lock, so running it after a pre-deploy migration is
+// harmless. If the database is unavailable, fail clearly before health checks
+// begin instead of serving a partially initialized application.
+try {
+  await migrate();
+  console.log("Kairos database ready.");
+} catch (error) {
+  const detail =
+    error instanceof Error ? error.message.replace(/[\r\n]+/g, " ").slice(0, 240) : "unknown_database_error";
+  console.error("database_migration_failed", detail);
+  process.exitCode = 1;
+  process.exit(1);
+}
+
 const app = createApp();
 await attachFrontend(app);
 const server = app.listen(Number(process.env.PORT || 3000), "0.0.0.0", () =>
@@ -24,10 +42,24 @@ const tick = async () => {
   working = true;
   try {
     await processNotifications();
+  } catch (error) {
+    const detail =
+      error instanceof Error ? error.message.replace(/[\r\n]+/g, " ").slice(0, 240) : "unknown_notification_error";
+    console.error("notification_task_error", detail);
+  }
+  try {
     await pool.query("DELETE FROM rate_buckets WHERE expires_at<now()");
+  } catch (error) {
+    const detail =
+      error instanceof Error ? error.message.replace(/[\r\n]+/g, " ").slice(0, 240) : "unknown_rate_cleanup_error";
+    console.error("rate_cleanup_error", detail);
+  }
+  try {
     await pool.query("DELETE FROM admin_sessions WHERE expires_at<now()");
-  } catch {
-    console.error("background_task_error");
+  } catch (error) {
+    const detail =
+      error instanceof Error ? error.message.replace(/[\r\n]+/g, " ").slice(0, 240) : "unknown_session_cleanup_error";
+    console.error("session_cleanup_error", detail);
   } finally {
     working = false;
   }

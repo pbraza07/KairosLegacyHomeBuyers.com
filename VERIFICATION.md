@@ -9,6 +9,7 @@
 - Retry and concurrent identical-submission deduplication; conflict for a reused ID with different data.
 - Unauthorized lead access denied; admin sign-in, cookie attributes, CSRF enforcement, content updates, stale-version conflict, invalid media rejection, deletion and logout.
 - Database failure produces 503 and no successful-save message; missing email configuration is recorded separately; simulated email-provider failure preserves the lead and subsequent retry recovers.
+- Startup migration is bundled into the server and runs idempotently before the app listens; background maintenance reports separate safe task codes for notification, rate cleanup, and session cleanup failures.
 - Unique server-delivered SEO metadata, structured data, sitemap, robots exclusions and real 404 response.
 - Live cloud-browser desktop inspection: logo and home image render; hero layout reviewed; navigation to FAQs works; accordion opens.
 - Live cloud-browser offer flow: empty-field errors, property entry, back navigation, preserved entries, all three steps, checked acknowledgment and successful save confirmation.

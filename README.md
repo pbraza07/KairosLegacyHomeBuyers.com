@@ -15,7 +15,7 @@ A complete React + Vite / Express TypeScript website for Tampa Bay homeowners re
 
 ## Local setup
 
-Use Node 22.12+ (Node 22 LTS recommended), npm, and PostgreSQL 17+. Docker is optional if you already have a PostgreSQL instance.
+Use Node 22.16.0 (pinned in `.node-version` and `package.json`), npm, and PostgreSQL 17+. Docker is optional if you already have a PostgreSQL instance. Pinning avoids Render silently moving an unbounded `>=22.12.0` range to a newer major version.
 
 ```bash
 npm ci
@@ -98,6 +98,8 @@ Exact service settings:
 | Proxy hops   | `TRUST_PROXY_HOPS=1` for Render's reverse proxy |
 
 The health endpoint returns 503 if the database or content table is unavailable. The service will not start without a database URL, canonical origin, and strong session secret. Do not deploy `dist/client` as a standalone static site: it needs this backend. Migrations use a transaction, advisory lock and migration ledger; re-running is safe. There are no automatic destructive down-migrations. Back up before future schema changes.
+
+The server also runs the same idempotent migrations immediately before it begins listening. This is a safety net for an existing manually-created Render Web Service whose Blueprint `preDeployCommand` was never synced. The configured Render pre-deploy migration should remain in place; running both is safe. A database connection or migration failure now stops startup with `database_migration_failed` instead of repeatedly logging an opaque background-task error.
 
 Blueprint syntax and current plan identifiers were checked against [Render's Blueprint reference](https://render.com/docs/blueprint-spec). If your account offers different plan labels, select equivalent paid web/Postgres plans in the dashboard; keep the build, start, health and database wiring above.
 
