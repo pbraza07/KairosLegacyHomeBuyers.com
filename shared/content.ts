@@ -36,7 +36,7 @@ export const defaultContent = {
     image: "/images/florida-home.webp",
     imageAlt:
       "A welcoming single-story Florida-style home with a lawn and palms; illustrative image",
-    imageCaption: "Your home. Your next chapter.",
+    imageCaption: "Your home selling process made simpler.",
     processEyebrow: "A clear path forward",
     processTitle: "A few simple steps. A little more peace of mind.",
     steps: [
