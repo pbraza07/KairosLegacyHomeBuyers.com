@@ -27,11 +27,15 @@ services:
       - key: DATABASE_SSL
         value: "false"
       - key: EMAIL_PROVIDER
-        value: resend
-      - key: RESEND_API_KEY
+        value: gmail_api
+      - key: GMAIL_CLIENT_ID
         sync: false
-      - key: NOTIFICATION_FROM
+      - key: GMAIL_CLIENT_SECRET
         sync: false
+      - key: GMAIL_REFRESH_TOKEN
+        sync: false
+      - key: GMAIL_API_USER
+        value: kairoslegacyhomes@gmail.com
       - key: NOTIFICATION_EMAIL
         value: kairoslegacyhomes@gmail.com
 

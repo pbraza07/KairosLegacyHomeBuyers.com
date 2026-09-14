@@ -8,6 +8,7 @@ import { pool } from "../server/db";
 import { passwordHash } from "../server/security";
 import {
   processNotifications,
+  setNotificationFetchForTests,
   setNotificationTransportForTests,
 } from "../server/notifications";
 import { defaultContent } from "../shared/content";
@@ -352,6 +353,53 @@ test("notification provider failure is separate and retry can recover", async ()
     setNotificationTransportForTests(undefined);
     delete process.env.GMAIL_SMTP_USER;
     delete process.env.GMAIL_SMTP_APP_PASSWORD;
+    delete process.env.NOTIFICATION_EMAIL;
+  }
+});
+
+test("Gmail API delivery uses HTTPS and does not require SMTP", async () => {
+  process.env.EMAIL_PROVIDER = "gmail_api";
+  process.env.GMAIL_CLIENT_ID = "client-id";
+  process.env.GMAIL_CLIENT_SECRET = "client-secret";
+  process.env.GMAIL_REFRESH_TOKEN = "refresh-token";
+  process.env.GMAIL_API_USER = "kairoslegacyhomes@gmail.com";
+  process.env.NOTIFICATION_EMAIL = "kairoslegacyhomes@gmail.com";
+  await pool.query(
+    "UPDATE notifications SET state='pending',attempts=0,next_attempt=now()",
+  );
+  const calls: string[] = [];
+  setNotificationFetchForTests(async (input, init) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes("oauth2.googleapis.com/token"))
+      return new Response(
+        JSON.stringify({ access_token: "access-token", expires_in: 3600 }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    assert.match(url, /gmail\.googleapis\.com\/gmail\/v1\/users\/me\/messages\/send/);
+    assert.equal(
+      (init?.headers as Record<string, string>).Authorization,
+      "Bearer access-token",
+    );
+    return new Response(JSON.stringify({ id: "gmail-message-id" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  try {
+    await processNotifications();
+    assert.equal(calls.length, 2);
+    assert.match(calls[0], /oauth2\.googleapis\.com\/token/);
+    assert.match(calls[1], /gmail\.googleapis\.com/);
+    const sent = await pool.query("SELECT state,last_code FROM notifications");
+    assert.ok(sent.rows.every((r) => r.state === "sent" && r.last_code === null));
+  } finally {
+    setNotificationFetchForTests(undefined);
+    delete process.env.EMAIL_PROVIDER;
+    delete process.env.GMAIL_CLIENT_ID;
+    delete process.env.GMAIL_CLIENT_SECRET;
+    delete process.env.GMAIL_REFRESH_TOKEN;
+    delete process.env.GMAIL_API_USER;
     delete process.env.NOTIFICATION_EMAIL;
   }
 });

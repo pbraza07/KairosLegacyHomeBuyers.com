@@ -43,26 +43,27 @@ Kairos application ready.
 
 ## Email notification setup
 
-Set `EMAIL_PROVIDER=resend` for a Render Free service. Render Free blocks
-outbound SMTP ports 25, 465 and 587, so Gmail SMTP cannot work there. Configure
-the Resend HTTPS API instead:
+Set `EMAIL_PROVIDER=gmail_api` for a Render Free service. This uses Gmail's
+HTTPS API, so the notification still comes from Gmail without SMTP:
 
 ```text
-EMAIL_PROVIDER=resend
-RESEND_API_KEY=your_resend_api_key
-NOTIFICATION_FROM=Kairos Legacy Homes <notifications@your-verified-domain.com>
+EMAIL_PROVIDER=gmail_api
+GMAIL_CLIENT_ID=your_google_oauth_client_id
+GMAIL_CLIENT_SECRET=your_google_oauth_client_secret
+GMAIL_REFRESH_TOKEN=your_google_oauth_refresh_token
+GMAIL_API_USER=kairoslegacyhomes@gmail.com
 NOTIFICATION_EMAIL=kairoslegacyhomes@gmail.com
 ```
 
-`NOTIFICATION_FROM` must use a domain verified in Resend. For testing, Resend's
-`onboarding@resend.dev` sender may be limited to the account's permitted test
-recipient; use a domain you control before launch. The HTTPS transport has a
-bounded timeout and an idempotency key, so it does not depend on SMTP ports.
+Create the OAuth client and refresh token with the Gmail send scope
+`https://www.googleapis.com/auth/gmail.send`. Google Cloud Console and OAuth
+Playground can be used from a local computer; Render Shell is not required.
+Keep the client secret and refresh token only in Render's server environment.
 
-Only use `EMAIL_PROVIDER=gmail` on a Render plan that permits outbound SMTP:
+Only use Gmail SMTP on a paid Render plan that permits outbound SMTP:
 
 ```text
-EMAIL_PROVIDER=gmail
+EMAIL_PROVIDER=gmail_smtp
 GMAIL_SMTP_USER=kairoslegacyhomes@gmail.com
 GMAIL_SMTP_APP_PASSWORD=your_google_app_password
 NOTIFICATION_EMAIL=kairoslegacyhomes@gmail.com
@@ -76,8 +77,7 @@ After changing environment values, use **Save and deploy** (not Save only).
 The worker marks a notification `sending` before delivery, uses timeouts, and
 the admin retry action re-queues stale `sending` rows older than five minutes.
 Refresh **Seller inquiries** after deploying. A `sent` status means the
-provider accepted the message; check the provider dashboard and recipient
-inbox for final delivery.
+Gmail accepted the message; check the recipient inbox and Spam/Promotions.
 
 ## Immediate recovery without a shell
 
@@ -85,8 +85,8 @@ If a notification is already stuck in `sending`, deploy/restart the service and
 wait five minutes. Then open `/admin` → **Seller inquiries** and click **Retry
 email notifications**. The corrected route re-queues failed, disabled and stale
 sending jobs. If the service shows `smtp_connection_error` on Render Free, set
-`EMAIL_PROVIDER=resend`; changing Gmail credentials cannot bypass Render's SMTP
-port restriction.
+`EMAIL_PROVIDER=gmail_api` and supply the OAuth variables; changing Gmail SMTP
+credentials cannot bypass Render's SMTP port restriction.
 
 Do not fix deployment errors by removing the startup database check or editing
 `node_modules`. The former allows an unhealthy deployment to appear live, and

@@ -10,7 +10,7 @@ A complete React + Vite / Express TypeScript website for Tampa Bay homeowners re
 - Contact form with real server validation and storage. Neither form calculates an offer.
 - Admin login, full structured content editor, repeatable items, page metadata, theme colors, logo/hero image uploads, private inquiry review, deletion, and notification retry.
 - Durable database-backed content: editing a seed file never overwrites previously saved admin changes. Migration defaults are inserted only once.
-- Resend HTTPS/Gmail SMTP notification outbox with retries. Messages contain a link to `/admin`, not seller information. No email integration runs in the browser.
+- Gmail API/Gmail SMTP notification outbox with retries. Messages contain a link to `/admin`, not seller information. No email integration runs in the browser.
 - Database migrations, health check, Render Blueprint, local PostgreSQL Docker Compose, test suite, and environment example.
 
 ## Local setup
@@ -105,28 +105,42 @@ Blueprint syntax and current plan identifiers were checked against [Render's Blu
 
 ## Email notifications
 
-The notification outbox supports two server-side transports. Set
-`EMAIL_PROVIDER=resend` for Render Free (recommended), or
-`EMAIL_PROVIDER=gmail` only on a Render plan that permits outbound SMTP. With
-`EMAIL_PROVIDER=auto`, the server prefers a complete Resend configuration and
-otherwise uses complete Gmail variables.
-
-### Resend (recommended on Render Free)
+The notification outbox supports Gmail through the Gmail API over HTTPS. Set
+`EMAIL_PROVIDER=gmail_api`; this works on Render Free and does not use Gmail
+SMTP or an App Password.
 
 Set these in Render's **server environment**:
 
-- `RESEND_API_KEY`: private Resend API key with send permission.
-- `NOTIFICATION_FROM`: a sender at a domain verified in Resend, such as `Kairos Legacy Homes <notifications@YOUR-VERIFIED-DOMAIN>`.
-- `NOTIFICATION_EMAIL`: the destination inbox; it defaults to `kairoslegacyhomes@gmail.com`.
+- `GMAIL_CLIENT_ID`: OAuth client ID from Google Cloud.
+- `GMAIL_CLIENT_SECRET`: matching OAuth client secret.
+- `GMAIL_REFRESH_TOKEN`: OAuth refresh token with the
+  `https://www.googleapis.com/auth/gmail.send` scope.
+- `GMAIL_API_USER`: `kairoslegacyhomes@gmail.com`.
+- `NOTIFICATION_EMAIL`: the destination inbox.
 
-For a short test, Resend's `onboarding@resend.dev` sender may be usable only for
-the account's permitted test recipient. Production should use a domain you
-control and verify in Resend. The HTTPS API uses a 10-second timeout and an
-inquiry-specific idempotency key.
+The server exchanges the refresh token for a short-lived access token, submits
+a minimal notification through Gmail's HTTPS API, and caches the token in
+memory. Tokens, credentials, seller data and message bodies never reach the
+browser or routine logs.
 
-### Gmail SMTP (temporary paid-plan fallback)
+### Creating Gmail API credentials (one time)
 
-Set these variables when the Render service can make outbound SMTP connections:
+1. In [Google Cloud Console](https://console.cloud.google.com/), create or select a project.
+2. Enable **Gmail API** under **APIs & Services → Library**.
+3. Configure the OAuth consent screen and add `kairoslegacyhomes@gmail.com` as a test user if the app is External.
+4. Under **APIs & Services → Credentials**, create an OAuth client ID of type **Web application**. Add `https://developers.google.com/oauthplayground` as an authorized redirect URI, then copy the client ID and secret.
+5. In [Google OAuth Playground](https://developers.google.com/oauthplayground/), open the settings gear, select **Use your own OAuth credentials**, and enter those values.
+6. Authorize `https://www.googleapis.com/auth/gmail.send` as `kairoslegacyhomes@gmail.com`, exchange the authorization code, and copy the refresh token into Render as `GMAIL_REFRESH_TOKEN`.
+7. For production, publish/verify the OAuth consent screen as required by Google. Testing-mode refresh tokens can expire.
+
+Never paste the client secret or refresh token into GitHub, the browser, or a
+support chat. If a Gmail App Password was previously exposed, revoke it; this
+provider does not use it.
+
+### Gmail SMTP fallback (paid Render plans only)
+
+`EMAIL_PROVIDER=gmail_smtp` remains available when the Render service permits
+outbound SMTP. Set these variables:
 
 - `GMAIL_SMTP_USER`: the Gmail account that sends the notification.
 - `GMAIL_SMTP_APP_PASSWORD`: a Google App Password, not the normal Google password.
@@ -134,9 +148,8 @@ Set these variables when the Render service can make outbound SMTP connections:
 
 Gmail App Passwords require 2-Step Verification. Create one at
 <https://myaccount.google.com/apppasswords> and paste the generated value
-without spaces or quotation marks. The server connects to `smtp.gmail.com` over
-TLS on port 465. Render Free blocks outbound SMTP ports 25, 465 and 587, so
-Gmail SMTP cannot work there; use Resend over HTTPS instead.
+without spaces or quotation marks. Render Free blocks SMTP ports 25, 465 and
+587, so Gmail SMTP cannot work on that plan.
 
 After a successful database transaction, the outbox processor checks for
 notifications every 30 seconds. Missing configuration marks notification
@@ -201,7 +214,7 @@ npm run test:browser
 - Your GitHub repository / Render account and selected paid plans.
 - Final domain / canonical HTTPS origin.
 - Your private admin email and strong password (the supplied business email may be used).
-- Verified notification sender domain, Resend API key, and confirmation of the notification inbox.
+- Google Cloud OAuth client ID/secret, Gmail refresh token with the Gmail send scope, and confirmation of the notification inbox.
 - Optional Turnstile keys and registered hostname.
 - Approved Privacy Policy, business retention/deletion procedure, and chosen backup settings.
 - Review the supplied phone `(813) 699-9316`, email `kairoslegacyhomes@gmail.com`, service areas, and family/veteran ownership wording. These are already populated, not missing placeholders.
