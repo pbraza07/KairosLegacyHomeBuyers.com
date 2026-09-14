@@ -3,7 +3,7 @@
 ## Passed
 
 - `npm run build`: TypeScript checks, Vite production frontend, bundled Express server.
-- `npm test`: **7 integration tests passed** against PGlite's PostgreSQL engine through a test-only adapter.
+- `npm test`: **8 integration tests passed** against PGlite's PostgreSQL engine through a test-only adapter.
 - Repeated migrations; persisted inquiry records queried after submission; correct 201/200 responses and no seller information in public responses.
 - Required fields, email/ZIP formats, phone required for phone/text, explicit acknowledgment, honeypot, same-origin checks, bounded JSON bodies and rate limiting.
 - Retry and concurrent identical-submission deduplication; conflict for a reused ID with different data.
@@ -31,7 +31,7 @@ Responsive breakpoints, visible focus styles, sticky-CTA clearance, reduced-moti
 
 - Actual Render deployment/Blueprint validation in the owner's account and managed PostgreSQL connectivity; the production database was not provisioned.
 - Production HTTPS admin cookie, chosen domain/origin and proxy topology.
-- Real Gmail OAuth credentials and recipient inbox delivery; development tests use injected transports and send no real messages. The default Render path uses the Gmail API over HTTPS, so it does not depend on outbound SMTP.
+- Real Gmail OAuth credentials and recipient inbox delivery; development tests use injected transports and send no real messages. The default Render path uses the Gmail API over HTTPS, so it does not depend on outbound SMTP. The notification test verifies contact/property details and the `Reply-To` header.
 - Real Turnstile keys/allowed hostnames if enabled.
 - Provider backups and a restore exercise, privacy/retention approval, and final mobile/tablet QA.
 

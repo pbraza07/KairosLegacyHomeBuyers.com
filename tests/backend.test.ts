@@ -342,7 +342,9 @@ test("notification provider failure is separate and retry can recover", async ()
     await pool.query("UPDATE notifications SET next_attempt=now()");
     setNotificationTransportForTests({
       sendMail: async (message: any) => {
-        assert.ok(!String(message.text).includes("seller@example.test"));
+        assert.ok(String(message.text).includes("seller@example.test"));
+        assert.ok(String(message.text).includes("Street address: 123 Test Street"));
+        assert.equal(message.replyTo, "seller@example.test");
         return { messageId: "synthetic-provider-id" } as any;
       },
     });
@@ -364,10 +366,28 @@ test("Gmail API delivery uses HTTPS and does not require SMTP", async () => {
   process.env.GMAIL_REFRESH_TOKEN = "refresh-token";
   process.env.GMAIL_API_USER = "kairoslegacyhomes@gmail.com";
   process.env.NOTIFICATION_EMAIL = "kairoslegacyhomes@gmail.com";
+  const contactId = randomUUID();
+  await pool.query(
+    "INSERT INTO inquiries(id,kind,payload,payload_hash) VALUES($1,'contact',$2,$3)",
+    [
+      contactId,
+      {
+        fullName: "Contact Test",
+        email: "contact@example.test",
+        phone: "",
+        preferred: "Email",
+        acknowledgment: true,
+        message: "Question about a property.",
+      },
+      `test-contact-${contactId}`,
+    ],
+  );
+  await pool.query("INSERT INTO notifications(inquiry_id) VALUES($1)", [contactId]);
   await pool.query(
     "UPDATE notifications SET state='pending',attempts=0,next_attempt=now()",
   );
   const calls: string[] = [];
+  const rawMessages: string[] = [];
   setNotificationFetchForTests(async (input, init) => {
     const url = String(input);
     calls.push(url);
@@ -381,6 +401,12 @@ test("Gmail API delivery uses HTTPS and does not require SMTP", async () => {
       (init?.headers as Record<string, string>).Authorization,
       "Bearer access-token",
     );
+    const requestBody = JSON.parse(String(init?.body)) as { raw?: string };
+    assert.equal(typeof requestBody.raw, "string");
+    const encoded = requestBody.raw!.replace(/-/g, "+").replace(/_/g, "/");
+    rawMessages.push(
+      Buffer.from(encoded + "=".repeat((4 - (encoded.length % 4)) % 4), "base64").toString(),
+    );
     return new Response(JSON.stringify({ id: "gmail-message-id" }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -388,9 +414,13 @@ test("Gmail API delivery uses HTTPS and does not require SMTP", async () => {
   });
   try {
     await processNotifications();
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 3);
     assert.match(calls[0], /oauth2\.googleapis\.com\/token/);
     assert.match(calls[1], /gmail\.googleapis\.com/);
+    assert.match(calls[2], /gmail\.googleapis\.com/);
+    assert.ok(rawMessages.some((value) => value.includes("Street address: 123 Test Street")));
+    assert.ok(rawMessages.some((value) => /Message\r?\nQuestion about a property\./.test(value)));
+    assert.ok(rawMessages.every((value) => value.includes("Reply-To:")));
     const sent = await pool.query("SELECT state,last_code FROM notifications");
     assert.ok(sent.rows.every((r) => r.state === "sent" && r.last_code === null));
   } finally {

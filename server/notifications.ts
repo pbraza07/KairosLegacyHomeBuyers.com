@@ -207,21 +207,30 @@ async function gmailAccessToken(provider: Extract<NotificationProvider, { kind: 
   return data.access_token;
 }
 
+type NotificationMessage = {
+  subject: string;
+  text: string;
+  replyTo: string;
+};
+
 async function sendGmailApi(
   provider: Extract<NotificationProvider, { kind: "gmail_api" }>,
   inquiryId: string,
-  text: string,
+  notification: NotificationMessage,
 ) {
   const accessToken = await gmailAccessToken(provider);
   const raw = [
     `From: ${provider.user}`,
     `To: ${provider.recipient}`,
-    "Subject: New Kairos website inquiry",
+    `Subject: ${safeHeader(notification.subject)}`,
+    ...(notification.replyTo
+      ? [`Reply-To: ${safeHeader(notification.replyTo)}`]
+      : []),
     `X-Kairos-Inquiry-ID: ${inquiryId}`,
     'Content-Type: text/plain; charset="UTF-8"',
     "Content-Transfer-Encoding: 8bit",
     "",
-    text,
+    notification.text,
   ].join("\r\n");
   let response: Response;
   try {
@@ -241,6 +250,77 @@ async function sendGmailApi(
     throw new Error("gmail_api_connection_error");
   }
   if (!response.ok) throw new Error(`gmail_api_${response.status}`);
+}
+
+type InquiryKind = "offer" | "contact";
+
+function payloadText(payload: Record<string, unknown>, key: string) {
+  const value = payload[key];
+  return typeof value === "string" && value.trim() ? value.trim() : "Not provided";
+}
+
+function safeHeader(value: string) {
+  return value.replace(/[\r\n]+/g, " ").trim().slice(0, 160);
+}
+
+function notificationMessage(
+  kind: InquiryKind,
+  payload: Record<string, unknown>,
+) {
+  const fullName = payloadText(payload, "fullName");
+  const email = payloadText(payload, "email");
+  const phone = payloadText(payload, "phone");
+  const preferred = payloadText(payload, "preferred");
+  const lines = [
+    kind === "offer"
+      ? "New property review request"
+      : "New contact message",
+    "",
+    "Contact",
+    `Full name: ${fullName}`,
+    `Email: ${email}`,
+    `Phone: ${phone}`,
+    `Preferred contact method: ${preferred}`,
+  ];
+  if (kind === "offer") {
+    lines.push(
+      "",
+      "Property",
+      `Street address: ${payloadText(payload, "street")}`,
+      `City: ${payloadText(payload, "city")}`,
+      `State: ${payloadText(payload, "state")}`,
+      `ZIP code: ${payloadText(payload, "zip")}`,
+      `Property type: ${payloadText(payload, "propertyType")}`,
+      `Bedrooms: ${payloadText(payload, "bedrooms")}`,
+      `Bathrooms: ${payloadText(payload, "bathrooms")}`,
+      `Approximate square footage: ${payloadText(payload, "sqft")}`,
+      `Year built: ${payloadText(payload, "yearBuilt")}`,
+      "",
+      "Condition and timing",
+      `Condition: ${payloadText(payload, "condition")}`,
+      `Occupancy: ${payloadText(payload, "occupancy")}`,
+      `Desired selling timeline: ${payloadText(payload, "timeline")}`,
+      `Asking price or estimated value: ${payloadText(payload, "askingPrice")}`,
+      `Reason for selling: ${payloadText(payload, "reason")}`,
+      `Additional property details: ${payloadText(payload, "details")}`,
+    );
+  } else {
+    lines.push("", "Message", payloadText(payload, "message"));
+  }
+  lines.push(
+    "",
+    "Reply directly to this email to respond to the seller.",
+    "",
+    "This inquiry was submitted through the Kairos Legacy Homes website.",
+  );
+  return {
+    subject:
+      kind === "offer"
+        ? "New Kairos property review inquiry"
+        : "New Kairos contact message",
+    text: lines.join("\n"),
+    replyTo: email === "Not provided" ? "" : email,
+  };
 }
 
 export async function processNotifications() {
@@ -283,7 +363,15 @@ export async function processNotifications() {
       : undefined;
   for (const row of r.rows) {
     try {
-      const text = `A new inquiry has been saved. Sign in securely to review it: ${process.env.APP_ORIGIN}/admin\n\nSeller information is available only in your admin area.`;
+      const inquiry = await pool.query(
+        "SELECT kind,payload FROM inquiries WHERE id=$1",
+        [row.inquiry_id],
+      );
+      if (!inquiry.rowCount) throw new Error("inquiry_missing");
+      const notification = notificationMessage(
+        inquiry.rows[0].kind as InquiryKind,
+        inquiry.rows[0].payload as Record<string, unknown>,
+      );
       if (provider.kind === "resend") {
         const response = await httpFetch("https://api.resend.com/emails", {
           method: "POST",
@@ -295,24 +383,26 @@ export async function processNotifications() {
           body: JSON.stringify({
             from: provider.from,
             to: [provider.recipient],
-            subject: "New Kairos website inquiry",
-            text,
+            subject: notification.subject,
+            text: notification.text,
+            ...(notification.replyTo ? { reply_to: notification.replyTo } : {}),
           }),
           signal: AbortSignal.timeout(10_000),
         });
         if (!response.ok) throw new Error(`resend_${response.status}`);
       } else if (provider.kind === "gmail_api") {
-        await sendGmailApi(provider, row.inquiry_id, text);
+        await sendGmailApi(provider, row.inquiry_id, notification);
       } else {
-        const message: SendMailOptions = {
+        const mailOptions: SendMailOptions = {
           // Send from the authenticated Gmail account. Do not use the seller's
           // email address or an unverified From address.
           from: provider.user,
           to: provider.recipient,
-          subject: "New Kairos website inquiry",
-          text,
+          subject: notification.subject,
+          text: notification.text,
+          ...(notification.replyTo ? { replyTo: notification.replyTo } : {}),
         };
-        await mailer!.sendMail(message);
+        await mailer!.sendMail(mailOptions);
       }
       await pool.query(
         "UPDATE notifications SET state='sent',last_code=NULL,updated_at=now() WHERE inquiry_id=$1",

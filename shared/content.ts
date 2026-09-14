@@ -194,7 +194,7 @@ export const defaultContent = {
       },
       {
         title: "Storage and service providers",
-        text: "Submissions and website content are stored in a PostgreSQL database. Authorized business administrators can access submissions through a password-protected area. Hosting and database providers process this information to run the website. If email notifications are configured, the email provider receives the business notification address and a message that an inquiry is available; seller details are not included in that notification.",
+        text: "Submissions and website content are stored in a PostgreSQL database. Authorized business administrators can access submissions through a password-protected area. Hosting and database providers process this information to run the website. If email notifications are configured, the selected email provider receives the business notification address and the submitted inquiry details so Kairos Legacy Homes can respond. The seller email is included as Reply-To when available.",
       },
       {
         title: "Cookies and spam prevention",

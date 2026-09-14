@@ -10,7 +10,7 @@ A complete React + Vite / Express TypeScript website for Tampa Bay homeowners re
 - Contact form with real server validation and storage. Neither form calculates an offer.
 - Admin login, full structured content editor, repeatable items, page metadata, theme colors, logo/hero image uploads, private inquiry review, deletion, and notification retry.
 - Durable database-backed content: editing a seed file never overwrites previously saved admin changes. Migration defaults are inserted only once.
-- Gmail API/Gmail SMTP notification outbox with retries. Messages contain a link to `/admin`, not seller information. No email integration runs in the browser.
+- Gmail API/Gmail SMTP notification outbox with retries. Messages include the submitted inquiry details and set the seller email as `Reply-To`; no email integration runs in the browser.
 - Database migrations, health check, Render Blueprint, local PostgreSQL Docker Compose, test suite, and environment example.
 
 ## Local setup
@@ -162,8 +162,9 @@ saved inquiry into an error for the homeowner.
 **sent** means the provider accepted the message; inbox delivery/bounce
 confirmation is not implemented. Check the provider dashboard and the
 recipient's Spam, Promotions, Sent and All Mail folders during launch testing.
-The notification body contains only a secure `/admin` link; seller information
-remains in the protected admin area.
+Notification emails include the submitted contact/property details so the
+business can respond quickly. The seller email is set as `Reply-To`, while
+seller data remains protected from public API responses, URLs and routine logs.
 
 ## Spam protection and security
 
