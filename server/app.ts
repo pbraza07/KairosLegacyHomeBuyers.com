@@ -186,11 +186,16 @@ export function createApp() {
           "INSERT INTO inquiries(id,kind,payload,payload_hash) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO NOTHING RETURNING id",
           [id, kind, parsed.data, hash],
         );
-        if (inserted.rowCount)
+        if (inserted.rowCount) {
           await client.query(
             "INSERT INTO notifications(inquiry_id) VALUES($1)",
             [id],
           );
+          await client.query(
+            "INSERT INTO seller_notifications(inquiry_id) VALUES($1)",
+            [id],
+          );
+        }
         else {
           const existing = await client.query(
             "SELECT payload_hash FROM inquiries WHERE id=$1",
@@ -328,7 +333,7 @@ export function createApp() {
   app.get("/api/admin/inquiries", async (req, res) => {
     const page = Math.max(0, Math.min(10000, Number(req.query.page) || 0));
     const r = await pool.query(
-      "SELECT i.id,i.kind,i.payload,i.created_at,n.state AS notification_state,n.last_code FROM inquiries i LEFT JOIN notifications n ON n.inquiry_id=i.id ORDER BY i.created_at DESC LIMIT 26 OFFSET $1",
+      "SELECT i.id,i.kind,i.payload,i.created_at,n.state AS notification_state,n.last_code,sn.state AS seller_notification_state,sn.last_code AS seller_last_code FROM inquiries i LEFT JOIN notifications n ON n.inquiry_id=i.id LEFT JOIN seller_notifications sn ON sn.inquiry_id=i.id ORDER BY i.created_at DESC LIMIT 26 OFFSET $1",
       [Math.floor(page) * 25],
     );
     res.json({ items: r.rows.slice(0, 25), hasMore: r.rows.length > 25 });
@@ -342,6 +347,9 @@ export function createApp() {
   app.post("/api/admin/retry-notifications", async (_req, res) => {
     await pool.query(
       "UPDATE notifications SET state='pending',attempts=0,next_attempt=now() WHERE state IN ('failed','disabled') OR (state='sending' AND updated_at<now()-interval '5 minutes')",
+    );
+    await pool.query(
+      "UPDATE seller_notifications SET state='pending',attempts=0,next_attempt=now() WHERE state IN ('failed','disabled') OR (state='sending' AND updated_at<now()-interval '5 minutes')",
     );
     res.json({ ok: true });
   });

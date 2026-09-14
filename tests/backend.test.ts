@@ -340,17 +340,30 @@ test("notification provider failure is separate and retry can recover", async ()
     const failed = await pool.query("SELECT state FROM notifications");
     assert.ok(failed.rows.every((r) => r.state === "failed"));
     await pool.query("UPDATE notifications SET next_attempt=now()");
+    await pool.query("UPDATE seller_notifications SET next_attempt=now()");
     setNotificationTransportForTests({
       sendMail: async (message: any) => {
-        assert.ok(String(message.text).includes("seller@example.test"));
-        assert.ok(String(message.text).includes("Street address: 123 Test Street"));
-        assert.equal(message.replyTo, "seller@example.test");
+        const text = String(message.text);
+        if (String(message.subject).includes("New Kairos")) {
+          assert.ok(text.includes("seller@example.test"));
+          assert.ok(text.includes("Street address: 123 Test Street"));
+          assert.equal(message.to, "inbox@example.test");
+          assert.equal(message.replyTo, "seller@example.test");
+        } else {
+          assert.ok(text.includes("We have received your property review request"));
+          assert.ok(text.includes("123 Test Street, Wesley Chapel, FL 33545"));
+          assert.ok(text.includes("respond within 24 hours"));
+          assert.equal(message.to, "seller@example.test");
+          assert.equal(message.replyTo, "inbox@example.test");
+        }
         return { messageId: "synthetic-provider-id" } as any;
       },
     });
     await processNotifications();
     const sent = await pool.query("SELECT state FROM notifications");
     assert.ok(sent.rows.every((r) => r.state === "sent"));
+    const sellerSent = await pool.query("SELECT state FROM seller_notifications");
+    assert.ok(sellerSent.rows.every((r) => r.state === "sent"));
   } finally {
     setNotificationTransportForTests(undefined);
     delete process.env.GMAIL_SMTP_USER;
@@ -383,6 +396,7 @@ test("Gmail API delivery uses HTTPS and does not require SMTP", async () => {
     ],
   );
   await pool.query("INSERT INTO notifications(inquiry_id) VALUES($1)", [contactId]);
+  await pool.query("INSERT INTO seller_notifications(inquiry_id) VALUES($1)", [contactId]);
   await pool.query(
     "UPDATE notifications SET state='pending',attempts=0,next_attempt=now()",
   );
@@ -414,15 +428,16 @@ test("Gmail API delivery uses HTTPS and does not require SMTP", async () => {
   });
   try {
     await processNotifications();
-    assert.equal(calls.length, 3);
-    assert.match(calls[0], /oauth2\.googleapis\.com\/token/);
-    assert.match(calls[1], /gmail\.googleapis\.com/);
-    assert.match(calls[2], /gmail\.googleapis\.com/);
-    assert.ok(rawMessages.some((value) => value.includes("Street address: 123 Test Street")));
+    assert.equal(calls.filter((url) => url.includes("oauth2.googleapis.com/token")).length, 1);
+    assert.ok(calls.filter((url) => url.includes("gmail.googleapis.com")).length >= 2);
     assert.ok(rawMessages.some((value) => /Message\r?\nQuestion about a property\./.test(value)));
+    assert.ok(rawMessages.some((value) => value.includes("We have received your contact message")));
+    assert.ok(rawMessages.some((value) => value.includes("respond within 24 hours")));
     assert.ok(rawMessages.every((value) => value.includes("Reply-To:")));
     const sent = await pool.query("SELECT state,last_code FROM notifications");
     assert.ok(sent.rows.every((r) => r.state === "sent" && r.last_code === null));
+    const sellerSent = await pool.query("SELECT state,last_code FROM seller_notifications");
+    assert.ok(sellerSent.rows.some((r) => r.state === "sent" && r.last_code === null));
   } finally {
     setNotificationFetchForTests(undefined);
     delete process.env.EMAIL_PROVIDER;

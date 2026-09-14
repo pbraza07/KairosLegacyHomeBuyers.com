@@ -208,6 +208,8 @@ async function gmailAccessToken(provider: Extract<NotificationProvider, { kind: 
 }
 
 type NotificationMessage = {
+  channel: "business" | "seller";
+  to: string;
   subject: string;
   text: string;
   replyTo: string;
@@ -221,12 +223,13 @@ async function sendGmailApi(
   const accessToken = await gmailAccessToken(provider);
   const raw = [
     `From: ${provider.user}`,
-    `To: ${provider.recipient}`,
+    `To: ${safeHeader(notification.to)}`,
     `Subject: ${safeHeader(notification.subject)}`,
     ...(notification.replyTo
       ? [`Reply-To: ${safeHeader(notification.replyTo)}`]
       : []),
     `X-Kairos-Inquiry-ID: ${inquiryId}`,
+    `X-Kairos-Notification: ${notification.channel}`,
     'Content-Type: text/plain; charset="UTF-8"',
     "Content-Transfer-Encoding: 8bit",
     "",
@@ -259,6 +262,11 @@ function payloadText(payload: Record<string, unknown>, key: string) {
   return typeof value === "string" && value.trim() ? value.trim() : "Not provided";
 }
 
+function payloadValue(payload: Record<string, unknown>, key: string) {
+  const value = payload[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function safeHeader(value: string) {
   return value.replace(/[\r\n]+/g, " ").trim().slice(0, 160);
 }
@@ -266,6 +274,7 @@ function safeHeader(value: string) {
 function notificationMessage(
   kind: InquiryKind,
   payload: Record<string, unknown>,
+  recipient: string,
 ) {
   const fullName = payloadText(payload, "fullName");
   const email = payloadText(payload, "email");
@@ -314,6 +323,8 @@ function notificationMessage(
     "This inquiry was submitted through the Kairos Legacy Homes website.",
   );
   return {
+    channel: "business" as const,
+    to: recipient,
     subject:
       kind === "offer"
         ? "New Kairos property review inquiry"
@@ -321,6 +332,150 @@ function notificationMessage(
     text: lines.join("\n"),
     replyTo: email === "Not provided" ? "" : email,
   };
+}
+
+function propertyAddress(payload: Record<string, unknown>) {
+  const street = payloadValue(payload, "street");
+  const city = payloadValue(payload, "city");
+  const state = payloadValue(payload, "state");
+  const zip = payloadValue(payload, "zip");
+  const locality = [city, [state, zip].filter(Boolean).join(" ")]
+    .filter(Boolean)
+    .join(", ");
+  return [street, locality].filter(Boolean).join(", ");
+}
+
+function sellerAcknowledgment(
+  kind: InquiryKind,
+  payload: Record<string, unknown>,
+  recipient: string,
+  businessReplyTo: string,
+) {
+  const fullName = payloadValue(payload, "fullName");
+  const firstName = fullName.split(/\s+/)[0] || "there";
+  const address = kind === "offer" ? propertyAddress(payload) : "";
+  const requestDescription =
+    kind === "offer"
+      ? address
+        ? `property review request for the home at ${address}`
+        : "property review request"
+      : "contact message";
+  const lines = [
+    `Hello ${firstName},`,
+    "",
+    "Thank you for contacting Kairos Legacy Homes LLC.",
+    `We have received your ${requestDescription}.`,
+    "",
+    "We will review the information you provided and respond within 24 hours.",
+    "If you have additional details to share, you can reply directly to this email.",
+    "",
+    "Warm regards,",
+    "Kairos Legacy Homes LLC",
+  ];
+  return {
+    channel: "seller" as const,
+    to: recipient,
+    subject: "We received your Kairos Legacy Homes request",
+    text: lines.join("\n"),
+    // Replies to an automatic acknowledgement should return to Kairos, not
+    // back to the seller's own address.
+    replyTo: businessReplyTo,
+  };
+}
+
+async function deliverMessage(
+  provider: NotificationProvider,
+  mailer: NotificationTransport | undefined,
+  inquiryId: string,
+  notification: NotificationMessage,
+) {
+  if (provider.kind === "resend") {
+    const response = await httpFetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${provider.apiKey}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": `inquiry-${inquiryId}-${notification.channel}`,
+      },
+      body: JSON.stringify({
+        from: provider.from,
+        to: [notification.to],
+        subject: notification.subject,
+        text: notification.text,
+        ...(notification.replyTo ? { reply_to: notification.replyTo } : {}),
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new Error(`resend_${response.status}`);
+  } else if (provider.kind === "gmail_api") {
+    await sendGmailApi(provider, inquiryId, notification);
+  } else {
+    const mailOptions: SendMailOptions = {
+      // Send from the authenticated Gmail account. Do not use the seller's
+      // email address or an unverified From address.
+      from: provider.user,
+      to: notification.to,
+      subject: notification.subject,
+      text: notification.text,
+      ...(notification.replyTo ? { replyTo: notification.replyTo } : {}),
+    };
+    await mailer!.sendMail(mailOptions);
+  }
+}
+
+type NotificationQueue = "business" | "seller";
+
+async function processQueue(
+  provider: NotificationProvider,
+  mailer: NotificationTransport | undefined,
+  queue: NotificationQueue,
+) {
+  // This table name is selected from a closed internal union, never from a
+  // request parameter, so interpolating it is safe.
+  const table = queue === "business" ? "notifications" : "seller_notifications";
+  await pool.query(`UPDATE ${table} SET state='pending' WHERE state='disabled'`);
+  const claimed = await pool.query(
+    `UPDATE ${table} SET state='sending', attempts=attempts+1,updated_at=now() WHERE inquiry_id IN (SELECT inquiry_id FROM ${table} WHERE ((state IN ('pending','failed') AND next_attempt<=now() AND attempts<6) OR (state='sending' AND updated_at<now()-interval '5 minutes')) ORDER BY next_attempt FOR UPDATE SKIP LOCKED LIMIT 5) RETURNING inquiry_id,attempts`,
+  );
+  for (const row of claimed.rows) {
+    try {
+      const inquiry = await pool.query(
+        "SELECT kind,payload FROM inquiries WHERE id=$1",
+        [row.inquiry_id],
+      );
+      if (!inquiry.rowCount) throw new Error("inquiry_missing");
+      const kind = inquiry.rows[0].kind as InquiryKind;
+      const payload = inquiry.rows[0].payload as Record<string, unknown>;
+      const notification =
+        queue === "business"
+          ? notificationMessage(kind, payload, provider.recipient)
+          : sellerAcknowledgment(
+              kind,
+              payload,
+              payloadValue(payload, "email"),
+              provider.recipient,
+            );
+      await deliverMessage(provider, mailer, row.inquiry_id, notification);
+      await pool.query(
+        `UPDATE ${table} SET state='sent',last_code=NULL,updated_at=now() WHERE inquiry_id=$1`,
+        [row.inquiry_id],
+      );
+    } catch (error) {
+      const code = classifyDeliveryError(error);
+      // Keep logs free of message bodies, addresses and credentials. The
+      // diagnostic code is also visible to the admin through the API.
+      console.error(
+        queue === "business"
+          ? "notification_delivery_failed"
+          : "seller_acknowledgment_delivery_failed",
+        code,
+      );
+      await pool.query(
+        `UPDATE ${table} SET state='failed',last_code=$2,next_attempt=now()+($3*interval '1 minute'),updated_at=now() WHERE inquiry_id=$1`,
+        [row.inquiry_id, code, Math.min(60, 2 ** row.attempts)],
+      );
+    }
+  }
 }
 
 export async function processNotifications() {
@@ -349,74 +504,17 @@ export async function processNotifications() {
     await pool.query(
       "UPDATE notifications SET state='disabled',last_code='missing_email_configuration' WHERE state='pending'",
     );
+    await pool.query(
+      "UPDATE seller_notifications SET state='disabled',last_code='missing_email_configuration' WHERE state='pending'",
+    );
     return;
   }
-  await pool.query(
-    "UPDATE notifications SET state='pending' WHERE state='disabled'",
-  );
-  const r = await pool.query(
-    `UPDATE notifications SET state='sending', attempts=attempts+1,updated_at=now() WHERE inquiry_id IN (SELECT inquiry_id FROM notifications WHERE ((state IN ('pending','failed') AND next_attempt<=now() AND attempts<6) OR (state='sending' AND updated_at<now()-interval '5 minutes')) ORDER BY next_attempt FOR UPDATE SKIP LOCKED LIMIT 5) RETURNING inquiry_id,attempts`,
-  );
   const mailer =
     provider.kind === "gmail_smtp"
       ? getTransport(provider.user, provider.appPassword)
       : undefined;
-  for (const row of r.rows) {
-    try {
-      const inquiry = await pool.query(
-        "SELECT kind,payload FROM inquiries WHERE id=$1",
-        [row.inquiry_id],
-      );
-      if (!inquiry.rowCount) throw new Error("inquiry_missing");
-      const notification = notificationMessage(
-        inquiry.rows[0].kind as InquiryKind,
-        inquiry.rows[0].payload as Record<string, unknown>,
-      );
-      if (provider.kind === "resend") {
-        const response = await httpFetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${provider.apiKey}`,
-            "Content-Type": "application/json",
-            "Idempotency-Key": `inquiry-${row.inquiry_id}`,
-          },
-          body: JSON.stringify({
-            from: provider.from,
-            to: [provider.recipient],
-            subject: notification.subject,
-            text: notification.text,
-            ...(notification.replyTo ? { reply_to: notification.replyTo } : {}),
-          }),
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (!response.ok) throw new Error(`resend_${response.status}`);
-      } else if (provider.kind === "gmail_api") {
-        await sendGmailApi(provider, row.inquiry_id, notification);
-      } else {
-        const mailOptions: SendMailOptions = {
-          // Send from the authenticated Gmail account. Do not use the seller's
-          // email address or an unverified From address.
-          from: provider.user,
-          to: provider.recipient,
-          subject: notification.subject,
-          text: notification.text,
-          ...(notification.replyTo ? { replyTo: notification.replyTo } : {}),
-        };
-        await mailer!.sendMail(mailOptions);
-      }
-      await pool.query(
-        "UPDATE notifications SET state='sent',last_code=NULL,updated_at=now() WHERE inquiry_id=$1",
-        [row.inquiry_id],
-      );
-    } catch (error) {
-      const code = classifyDeliveryError(error);
-      // Keep logs free of message bodies, addresses and credentials. The
-      // diagnostic code is also visible to the admin through the API.
-      console.error("notification_delivery_failed", code);
-      await pool.query(
-        "UPDATE notifications SET state='failed',last_code=$2,next_attempt=now()+($3*interval '1 minute'),updated_at=now() WHERE inquiry_id=$1",
-        [row.inquiry_id, code, Math.min(60, 2 ** row.attempts)],
-      );
-    }
-  }
+  // Process the two outboxes separately. A seller reply can fail or retry
+  // without changing the internal business notification state, and vice versa.
+  await processQueue(provider, mailer, "business");
+  await processQueue(provider, mailer, "seller");
 }

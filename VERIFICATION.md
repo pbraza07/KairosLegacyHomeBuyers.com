@@ -31,7 +31,7 @@ Responsive breakpoints, visible focus styles, sticky-CTA clearance, reduced-moti
 
 - Actual Render deployment/Blueprint validation in the owner's account and managed PostgreSQL connectivity; the production database was not provisioned.
 - Production HTTPS admin cookie, chosen domain/origin and proxy topology.
-- Real Gmail OAuth credentials and recipient inbox delivery; development tests use injected transports and send no real messages. The default Render path uses the Gmail API over HTTPS, so it does not depend on outbound SMTP. The notification test verifies contact/property details and the `Reply-To` header.
+- Real Gmail OAuth credentials and recipient inbox delivery; development tests use injected transports and send no real messages. The default Render path uses the Gmail API over HTTPS, so it does not depend on outbound SMTP. The notification test verifies contact/property details, independent business/seller delivery, the seller acknowledgement address and 24-hour wording, and the appropriate `Reply-To` headers.
 - Real Turnstile keys/allowed hostnames if enabled.
 - Provider backups and a restore exercise, privacy/retention approval, and final mobile/tablet QA.
 

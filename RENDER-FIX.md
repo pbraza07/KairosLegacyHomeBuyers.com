@@ -76,8 +76,9 @@ was ever exposed in a screenshot, revoke it and create a new one.
 After changing environment values, use **Save and deploy** (not Save only).
 The worker marks a notification `sending` before delivery, uses timeouts, and
 the admin retry action re-queues stale `sending` rows older than five minutes.
-Refresh **Seller inquiries** after deploying. A `sent` status means the
-Gmail accepted the message; check the recipient inbox and Spam/Promotions.
+Refresh **Seller inquiries** after deploying. Each new inquiry shows separate
+`Email` and `Seller reply` statuses. A `sent` status means Gmail accepted that
+message; check the business and seller inboxes, including Spam/Promotions.
 
 ## Immediate recovery without a shell
 

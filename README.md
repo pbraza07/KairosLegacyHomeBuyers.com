@@ -10,7 +10,7 @@ A complete React + Vite / Express TypeScript website for Tampa Bay homeowners re
 - Contact form with real server validation and storage. Neither form calculates an offer.
 - Admin login, full structured content editor, repeatable items, page metadata, theme colors, logo/hero image uploads, private inquiry review, deletion, and notification retry.
 - Durable database-backed content: editing a seed file never overwrites previously saved admin changes. Migration defaults are inserted only once.
-- Gmail API/Gmail SMTP notification outbox with retries. Messages include the submitted inquiry details and set the seller email as `Reply-To`; no email integration runs in the browser.
+- Gmail API/Gmail SMTP notification outboxes with retries. The business message includes the submitted inquiry details and sets the seller email as `Reply-To`; a separate seller acknowledgement confirms receipt, includes the property address when available, promises a response within 24 hours, and routes replies back to Kairos. No email integration runs in the browser.
 - Database migrations, health check, Render Blueprint, local PostgreSQL Docker Compose, test suite, and environment example.
 
 ## Local setup
@@ -151,10 +151,11 @@ Gmail App Passwords require 2-Step Verification. Create one at
 without spaces or quotation marks. Render Free blocks SMTP ports 25, 465 and
 587, so Gmail SMTP cannot work on that plan.
 
-After a successful database transaction, the outbox processor checks for
-notifications every 30 seconds. Missing configuration marks notification
-status **disabled**. Configured delivery retries with increasing delays, up to
-six attempts; failures stay visible in admin and can be retried there. Provider
+After a successful database transaction, two independent outbox jobs are
+created: one business alert and one seller acknowledgement. The processor
+checks both queues every 30 seconds. Missing configuration marks both jobs
+**disabled**. Configured delivery retries with increasing delays, up to six
+attempts; failures stay visible in admin and can be retried there. Provider
 timeouts prevent an item from remaining in **sending** forever, and the retry
 button re-queues stale sending jobs. A notification failure does not change a
 saved inquiry into an error for the homeowner.
@@ -162,9 +163,14 @@ saved inquiry into an error for the homeowner.
 **sent** means the provider accepted the message; inbox delivery/bounce
 confirmation is not implemented. Check the provider dashboard and the
 recipient's Spam, Promotions, Sent and All Mail folders during launch testing.
-Notification emails include the submitted contact/property details so the
-business can respond quickly. The seller email is set as `Reply-To`, while
-seller data remains protected from public API responses, URLs and routine logs.
+Business notification emails include the submitted contact/property details so
+the business can respond quickly. The seller email is set as `Reply-To` on that
+message. The seller acknowledgement says the request was received, repeats the
+submitted property address when available, promises a response within 24 hours,
+and sets the business inbox as `Reply-To`. Seller data remains protected from
+public API responses, URLs and routine logs. Acknowledgements are only created
+for new inquiries after the seller outbox migration; older inquiries are not
+emailed automatically when this version is deployed.
 
 ## Spam protection and security
 

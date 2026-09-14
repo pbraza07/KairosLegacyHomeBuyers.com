@@ -8,6 +8,8 @@ type Inquiry = {
   created_at: string;
   notification_state: string;
   last_code: string | null;
+  seller_notification_state: string | null;
+  seller_last_code: string | null;
 };
 const pretty = (s: string) =>
   s.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (x) => x.toUpperCase());
@@ -417,6 +419,13 @@ export default function Admin({
                     {new Date(item.created_at).toLocaleDateString()} · Email:{" "}
                     {item.notification_state}
                     {item.last_code && ` (${item.last_code})`}
+                    {item.seller_notification_state && (
+                      <>
+                        {" · Seller reply: "}
+                        {item.seller_notification_state}
+                        {item.seller_last_code && ` (${item.seller_last_code})`}
+                      </>
+                    )}
                   </span>
                 </summary>
                 <dl>
